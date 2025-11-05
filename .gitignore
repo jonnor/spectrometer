@@ -1,0 +1,6 @@
+build/
+tmp/
+__pycache__/
+.ipynb_checkpoints/
+*.FCBak
+*.uf2
