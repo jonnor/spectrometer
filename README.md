@@ -5,10 +5,19 @@ This is a simple setup for a basic 14 channel visible-spectrum
 sensor based on [ams OSRAM AS7343](https://ams-osram.com/products/sensor-solutions/ambient-light-color-spectral-proximity-sensors/ams-as7343-spectral-sensor),
 using [MicroPython](https://micropython.org/) firmware.
 
-It has a stand designed for standard 10 mm cuvettes,
+![Classification of edible oil](doc/edible-oils-classification-crop.jpg)
+
+The device has a stand designed for standard (10 mm) cuvettes,
 set up for flouresence spectrocopy using white LED and reflectance spectroscopy using white LED.
-Especially intended for characterization of edible oils,
+
+Initially intended for characterization of edible oils,
 such as olive oil, canola/rapeseed, sunflower, et.c.
+
+This can be used for things like:
+
+- Detect/classify the type of oil
+- Detect adulterated oils, for example addition of waste frying oil or other oils in virgin olive oil
+- Detect degraded oil quality, for example due to exessive oxygen/heat exposure or age
 
 The machine learning parts are powered by [emlearn-micropython](https://github.com/emlearn/emlearn-micropython),
 a machine learning and digital signal processing library for MicroPython.
@@ -16,8 +25,15 @@ a machine learning and digital signal processing library for MicroPython.
 ## Status
 *Proof of Concept*. 
 
-Can collect data from AS7343, and classify edible successfully using a nearest-neighbor model.
+Can collect data from AS7343, and classify the type pf edible successfully using a nearest-neighbor model.
 For the demo only 2 dimensions were used, but up to 2x12=24 dimensions can be used.
+
+## TODO
+
+- Speed up the measurement cycle. Want under 1 second total
+- Collect data on different concentrations of oil. 
+- Test ability to detect adulteration of extra virgin olive oil
+- Implement regression model to estimate concentrations. Example: PCA+linreg, or PLSR
 
 ## Operating principle
 
@@ -77,8 +93,15 @@ As of November 2025 it is not downloadable on micropython.org, but must be built
 
 
 #### Install dependencies
+
+External dependencies
 ```
 mpremote mip install os-path
+```
+
+Local files
+```
+mpremote cp -r firmware/ :
 ```
 
 Run 
