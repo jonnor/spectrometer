@@ -28,6 +28,8 @@ a machine learning and digital signal processing library for MicroPython.
 Can collect data from AS7343, and classify the type pf edible successfully using a nearest-neighbor model.
 For the demo only 2 dimensions were used, but up to 2x12=24 dimensions can be used.
 
+[Short demo video (YouTube)](https://youtube.com/shorts/O7MoSn06O6k).
+
 ## TODO
 
 - Speed up the measurement cycle. Want under 1 second total
