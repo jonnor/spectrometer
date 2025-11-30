@@ -132,17 +132,18 @@ def update_screen(n, state, data, x_column, y_column, prediction, x_max=10000, y
         wri.set_clip(False, False, False)
 
         # TODO: center this
-        textfield = Label(wri, 0, 2, wri.stringlen('measure'))
+        textfield = Label(wri, 0, 2, wri.stringlen(prediction))
         textfield.value(prediction)        
 
     else:
+        text = state
 
         Writer.set_textpos(ssd, 0, 0)
         wri = Writer(ssd, fixed, verbose=False)
         wri.set_clip(False, False, False)
 
-        textfield = Label(wri, 0, 2, wri.stringlen('measure'))
-        textfield.value(state)
+        textfield = Label(wri, 0, 2, wri.stringlen(text))
+        textfield.value(text)
 
     refresh(ssd)
 
