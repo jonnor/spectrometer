@@ -99,11 +99,16 @@ As of November 2025 it is not downloadable on micropython.org, but must be built
 External dependencies
 ```
 mpremote mip install os-path
+mpremote mip install github:pimoroni/as7343-micropython
+mpremote mip install github:jonnor/micropython-npyfile
+mpremote mip install github:peterhinch/micropython-nano-gui
+mpremote mip install "github:peterhinch/micropython-nano-gui/drivers/ssd1306"
+mpremote mip install https://emlearn.github.io/emlearn-micropython/builds/latest/armv6m_6.3/emlearn_neighbors.mpy
 ```
 
 Local files
 ```
-mpremote cp -r firmware/ :
+mpremote cp -r firmware/* :
 ```
 
 Run 
