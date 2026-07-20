@@ -14,77 +14,10 @@ from as7343 import AS7343
 import npyfile
 
 import processing
+from measure import MeasurementService
 
 # Free memory used by imports
 gc.collect()
-
-async def measure_one(as7343, data, offset=0, wait_time=1.0):
-
-    order = AS7343.CHANNEL_MAP
-
-    # wait for condition to settle
-    await asyncio.sleep(wait_time)
-
-    # XXX: make sure to flush out old readings from FIFO
-    for i in range(10):
-        readings = as7343.read()
-        await asyncio.sleep(0.10)
-
-    # Copy data
-    for i, c in enumerate(order):
-        data[offset+i] = readings[c]
-
-    await asyncio.sleep(wait_time)
-
-async def measure_sample(i2c_ext, ext, data, wait_time=1.0):
-    """
-    Make one complete measurement, consisting of 3 sub-measurements:
-
-    - no excitation / baseline
-    - UV excitation / flouresence
-    - white / reflectance
-
-    The values are concatenated
-    """
-    
-    as7343 = AS7343(i2c_ext)
-
-    as7343.set_measurement_time(200) # ms
-    as7343.set_integration_time(100*1000, repeat=1) # us
-    as7343.set_illumination_led(False)
-    as7343.set_illumination_current(4)
-
-    n_channels = len(AS7343.CHANNEL_MAP)
-    n_datapoints = n_channels * 3
-    assert len(data) == n_datapoints
-
-    start = time.ticks_ms()
-    print('measure-sample-start', start)
-
-    as7343.start_measurement()
-    await asyncio.sleep(0.1)   
-
-    # measure without exitation
-    #print('measure-no-light')
-    #ext[0:16] = 0
-    #await measure_one(as7343, data, offset=0, wait_time=wait_time)
-
-    # Measure with UV exitation
-    print('measure-uv')
-    ext[0:16] = 100
-    await measure_one(as7343, data, offset=n_channels, wait_time=wait_time)
-    ext[0:16] = 0
-
-    # Measure with white LED
-    #print('measure-white')
-    #as7343.set_illumination_led(True)
-    #await measure_one(as7343, data, offset=2*n_channels, wait_time=wait_time)
-    #as7343.set_illumination_led(False)
-
-    as7343.stop_measurement()
-
-    duration = time.ticks_diff(time.ticks_ms(), start)
-    print('measure-sample-end', time.ticks_ms(), duration)
 
 
 # ---------------------------------------------------------------------------
@@ -116,13 +49,6 @@ async def _connect_wifi():
 
     print('WiFi connected:', wlan.ifconfig()[0])
 
-
-# TODO: track whether measuring or not
-class State:
-    def __init__(self, i2c, ext):
-        self.i2c = i2c
-        self.ext = ext
-
 def add_routes(app, state):
 
     # User interface
@@ -148,25 +74,28 @@ def add_routes(app, state):
 
     @app.get('/status')
     async def get_status(request):
+        progress_percent = 100*state.measurement.get_progress()
         s = {
             'connected': True,            
-            'measuring': True,
-            'progress': 50,
+            'measuring': state.measurement.is_started(),
+            'progress': progress_percent,
         }
         return s, 200
 
     @app.post('/measure')
-    async def post_measure(request, path):
+    async def post_measure(request):
 
         # Trigger a measurement
-        # TODO: error if something is already in progress. CONFLICT
-        # TODO: do async.
-        # Start the measurement, and track progress in some object.
-        data = array.array('f', (0.0 for _ in range(3*len(AS7343.CHANNEL_MAP))))
-        await measure_sample(state.i2c_ext, state.ext, data=data, wait_time=0.2)
+        # will cause exception if multiple. TODO: convert to exception
+        state.measurement.start()
 
         out = {}
         return out, 200
+
+
+class AppState:
+    def __init__(self, measurement):
+        self.measurement = measurement
 
 
 def main(host='0.0.0.0', port=8000, debug=True):
@@ -176,15 +105,16 @@ def main(host='0.0.0.0', port=8000, debug=True):
     # Web server
     app = Microdot()
 
-    i2c_ext = None
-    ext = None
+    i2c = None
+    gpio = None
+    as7343 = None
     if False: # TODO: detect when on device
         from machine import Pin, I2C
-        i2c_ext = I2C(1, scl=Pin(5), sda=Pin(4), freq=400000)
+        i2c = I2C(1, scl=Pin(5), sda=Pin(4), freq=400000)
         as7343 = AS7343(i2c_ext)
-        ext = AW9523(i2c_ext, address=0x5b)
+        gpio = AW9523(i2c_ext, address=0x5b)
 
-    state = State(i2c=i2c_ext, ext=ext)
+    state = AppState(measurement=MeasurementService(as7343, gpio))
 
     from cors import CORS
     cors = CORS(app, allowed_origins='*', allow_credentials=False)
