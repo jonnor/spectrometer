@@ -73,15 +73,19 @@ button { font-family: inherit; }
 
 /* Main / accordion */
 .app-main {
-  flex: 1 1 auto; overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  padding: 10px; display: flex; flex-direction: column; gap: 8px;
-  max-width: 720px; width: 100%; margin: 0 auto;
+  flex: 1 1 auto; min-height: 0;
+  display: flex; flex-direction: column;
+  padding: 10px; width: 100%;
 }
+.accordion { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
 .acc-section {
+  flex: 0 0 auto;
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius); overflow: hidden;
+  width: 100%;
 }
+.acc-section--open { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.acc-body-inner { padding: 14px 14px 16px; border-top: 1px solid var(--border); overflow-y: auto; flex: 1 1 auto; min-height: 0; }
 .acc-header {
   width: 100%; background: none; border: none; color: var(--text);
   display: flex; align-items: center; justify-content: space-between;
@@ -115,6 +119,16 @@ button { font-family: inherit; }
   border: 1px dashed var(--border); border-radius: 8px; padding: 20px;
   color: var(--text-dim); font-size: 13.5px; text-align: center;
 }
+
+.samples-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.samples-actions .btn-secondary { text-decoration: none; display: inline-flex; align-items: center; }
+.samples-list { display: flex; flex-direction: column; gap: 6px; }
+.sample-row {
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 7px;
+  padding: 8px 10px; font-size: 13px;
+}
+.hint-text { color: var(--text-dim); font-size: 13px; margin: 4px 0; }
+.field select:disabled { opacity: 0.75; cursor: default; }
 
 /* Footer */
 .app-footer {

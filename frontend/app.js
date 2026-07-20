@@ -86,11 +86,42 @@ function Field({ label, type = 'text', children, ...props }) {
   `;
 }
 
+// One-shot JSON GET, re-run when `url` changes. Single state object
+// keeps this to one useState instead of separate data/error/loading ones.
+function useFetchJson(url) {
+  const [state, setState] = useState({ data: null, error: null, loading: true });
+
+  useEffect(() => {
+    let cancelled = false;
+    setState(s => ({ ...s, loading: true }));
+    fetch(url)
+      .then(res => { if (!res.ok) throw new Error('request failed'); return res.json(); })
+      .then(data => { if (!cancelled) setState({ data, error: null, loading: false }); })
+      .catch(error => { if (!cancelled) setState({ data: null, error, loading: false }); });
+    return () => { cancelled = true; };
+  }, [url]);
+
+  return state;
+}
+
+// Maps a linear slider index [0, steps-1] to an exponential value in [min, max].
+function expSliderValue(index, min, max, steps) {
+  const t = index / (steps - 1);
+  return min * Math.pow(max / min, t);
+}
+
+// Inverse of expSliderValue — used to seed the slider position from a value.
+function expSliderIndex(value, min, max, steps) {
+  const t = Math.log(value / min) / Math.log(max / min);
+  return Math.round(t * (steps - 1));
+}
+
 /* ===========================================================
    Layout components
 =========================================================== */
 
 function Header({ connected, measuring, progress, onMenu, onMeasure }) {
+  console.log('header', connected, measuring, progress)
   return html`
     <header class="app-header">
       <div class="header-row">
@@ -125,7 +156,7 @@ function Header({ connected, measuring, progress, onMenu, onMeasure }) {
 function AccordionSection({ id, title, summary, openId, setOpenId, children }) {
   const isOpen = openId === id;
   return html`
-    <section class="acc-section">
+    <section class=${'acc-section' + (isOpen ? ' acc-section--open' : '')}>
       <button class="acc-header" onClick=${() => setOpenId(isOpen ? null : id)} aria-expanded=${isOpen}>
         <span class="acc-header-left">
           <span class=${'acc-chevron' + (isOpen ? ' acc-chevron--open' : '')}><${Icon.chevron} /></span>
@@ -141,7 +172,7 @@ function AccordionSection({ id, title, summary, openId, setOpenId, children }) {
 // Owns the single-open-section state and renders a list of sections.
 function Accordion({ sections, openId, setOpenId }) {
   return html`
-    <div>
+    <div class="accordion">
       ${sections.map(s => html`
         <${AccordionSection}
           key=${s.id}
@@ -190,31 +221,81 @@ function Footer() {
    Section contents (feature-specific, not generic components)
 =========================================================== */
 
-function SamplesSection() {
+// Range input driven by a linear index but displaying/emitting an
+// exponentially-spaced value. `steps` is the number of discrete positions.
+function ExpSlider({ label, value, onChange, min, max, steps }) {
+  const index = expSliderIndex(value, min, max, steps);
   return html`
-    <div class="field-grid">
-      <${Field} label="Sample ID" placeholder="e.g. S-0231" />
-      <${Field} label="Sample type" type="select">
-        <option>Serum</option>
-        <option>Plasma</option>
-        <option>Buffer</option>
-      <//>
-      <${Field} label="Volume (µL)" type="number" placeholder="200" />
+    <div class="field">
+      <span>${label} <span style=${{ color: 'var(--text)' }}>${value.toFixed(2)}</span></span>
+      <input
+        type="range"
+        min="0"
+        max=${steps - 1}
+        step="1"
+        value=${index}
+        onInput=${e => onChange(expSliderValue(Number(e.target.value), min, max, steps))}
+      />
     </div>
-    <${Button} onClick=${() => {}}>+ Add sample<//>
   `;
 }
 
-function AnalysisSection() {
+const SAMPLES_JUPYTER_NOTEBOOK = '/static/notebook.ipynb';
+
+function SamplesSection({ dataset, label, onDatasetChange, onLabelChange }) {
+  const { data, loading, error } = useFetchJson('/samples.json');
+  const samples = Array.isArray(data) ? data : [];
+
+  const notebookUrl = `${window.location.origin}${SAMPLES_JUPYTER_NOTEBOOK}`;
+  const jupyterHref = `https://scikit-learn.org/stable/lite/lab/?fromURL=${notebookUrl}`;
+
   return html`
     <div class="field-grid">
-      <${Field} label="Method" type="select">
-        <option>Absorbance 280nm</option>
-        <option>Fluorescence</option>
-        <option>Custom protocol</option>
+      <${Field}
+        label="Dataset"
+        value=${dataset}
+        onInput=${e => onDatasetChange(e.target.value)}
+      />
+      <${Field}
+        label="Label"
+        value=${label}
+        onInput=${e => onLabelChange(e.target.value)}
+      />
+    </div>
+
+    <div class="samples-actions">
+      <a class="btn-secondary" href="/samples.json" download>Download samples.json</a>
+      <a class="btn-secondary" href=${jupyterHref} target="_blank" rel="noopener">Open in Jupyter</a>
+    </div>
+
+    <div class="samples-list">
+      ${loading && html`<p class="hint-text">Loading samples…</p>`}
+      ${error && html`<p class="hint-text">Couldn't load samples.</p>`}
+      ${!loading && !error && samples.length === 0 && html`<p class="hint-text">No samples yet.</p>`}
+      ${samples.map((s, i) => html`<div class="sample-row" key=${s.id ?? i}>${s.name ?? JSON.stringify(s)}</div>`)}
+    </div>
+  `;
+}
+
+const ANALYSIS_METHOD = 'PCA logreg classification';
+const ALPHA_MIN = 0.01;
+const ALPHA_MAX = 10.0;
+const ALPHA_STEPS = 40;
+
+function AnalysisSection({ alpha, onAlphaChange }) {
+  return html`
+    <div class="field-grid">
+      <${Field} label="Method" type="select" value=${ANALYSIS_METHOD} disabled>
+        <option>${ANALYSIS_METHOD}</option>
       <//>
-      <${Field} label="Replicates" type="number" min="1" value="3" />
-      <${Field} label="Auto baseline correction" type="checkbox" checked />
+      <${ExpSlider}
+        label="Alpha"
+        value=${alpha}
+        onChange=${onAlphaChange}
+        min=${ALPHA_MIN}
+        max=${ALPHA_MAX}
+        steps=${ALPHA_STEPS}
+      />
     </div>
   `;
 }
@@ -257,10 +338,12 @@ function useStatus(url = '/status', intervalMs = POLL_MS) {
         const res = await fetch(url);
         if (!res.ok) throw new Error('bad status');
         const data = await res.json();
+        console.log('status-poll-returned', data)
         if (!cancelled) {
           setStatus({ connected: true, measuring: !!data.measuring, progress: data.progress ?? 0 });
         }
-      } catch {
+      } catch (e) {
+        console.log('status-poll-exception', e)
         if (!cancelled) setStatus({ connected: false, measuring: false, progress: 0 });
       }
     }
@@ -273,9 +356,13 @@ function useStatus(url = '/status', intervalMs = POLL_MS) {
   return status;
 }
 
-async function startMeasurement() {
+async function startMeasurement(params) {
   try {
-    await fetch('/measure', { method: 'POST' });
+    await fetch('/measure', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
   } catch {
     // Next poll will reflect the actual device state either way.
   }
@@ -287,14 +374,47 @@ async function startMeasurement() {
 
 function App() {
   const { connected, measuring, progress } = useStatus();
-  const [openId, setOpenId] = useState('samples');
+  const [openId, setOpenId] = useState('visualization');
   const [menuOpen, setMenuOpen] = useState(false);
-  const [sampleCount] = useState(3);
+
+  // Everything the measure endpoint needs, as one object.
+  const [measureParams, setMeasureParams] = useState({
+    dataset: 'data2',
+    label: 'unknown',
+    alpha: 1.0,
+  });
 
   const sections = [
-    { id: 'samples', title: 'Samples', summary: html`<${Chip}>${sampleCount} loaded<//>`, content: html`<${SamplesSection} />` },
-    { id: 'analysis', title: 'Analysis', summary: html`<${Chip}>Absorbance 280nm<//>`, content: html`<${AnalysisSection} />` },
-    { id: 'visualization', title: 'Visualization', summary: measuring ? html`<${Chip} tone="accent">Live<//>` : null, content: html`<${VisualizationSection} />` },
+    {
+      id: 'samples',
+      title: 'Samples',
+      summary: html`<${Chip}>${measureParams.dataset}<//>`,
+      content: html`
+        <${SamplesSection}
+          dataset=${measureParams.dataset}
+          label=${measureParams.label}
+          onDatasetChange=${dataset => setMeasureParams(p => ({ ...p, dataset }))}
+          onLabelChange=${label => setMeasureParams(p => ({ ...p, label }))}
+        />
+      `,
+    },
+    {
+      id: 'analysis',
+      title: 'Analysis',
+      summary: html`<${Chip}>${ANALYSIS_METHOD}<//>`,
+      content: html`
+        <${AnalysisSection}
+          alpha=${measureParams.alpha}
+          onAlphaChange=${alpha => setMeasureParams(p => ({ ...p, alpha }))}
+        />
+      `,
+    },
+    {
+      id: 'visualization',
+      title: 'Visualization',
+      summary: measuring ? html`<${Chip} tone="accent">Live<//>` : null,
+      content: html`<${VisualizationSection} />`,
+    },
   ];
 
   return html`
@@ -303,7 +423,7 @@ function App() {
       measuring=${measuring}
       progress=${progress}
       onMenu=${() => setMenuOpen(true)}
-      onMeasure=${startMeasurement}
+      onMeasure=${() => startMeasurement(measureParams)}
     />
 
     <main class="app-main">

@@ -136,26 +136,34 @@ def add_routes(app, state):
     async def get_static(request, path):
         return send_file('frontend/' + path, max_age=MAX_AGE)
 
-    @app.post('/status')
-    async def get_status(request, path):
+    @app.get('/samples.json')
+    async def get_samples(request):
+        s = []
+        # TODO: actually load samples
+
+        return s, 200
+
+    @app.get('/status')
+    async def get_status(request):
         s = {
-            '':
+            'connected': True,            
+            'measuring': True,
+            'progress': 50,
         }
-        return 200, s
+        return s, 200
 
     @app.post('/measure')
     async def post_measure(request, path):
 
-        # Do the measurement
-        # NOTE: takes several seconds
+        # Trigger a measurement
+        # TODO: error if something is already in progress. CONFLICT
+        # TODO: do async.
+        # Start the measurement, and track progress in some object.
         data = array.array('f', (0.0 for _ in range(3*len(AS7343.CHANNEL_MAP))))
         await measure_sample(state.i2c_ext, state.ext, data=data, wait_time=0.2)
 
-        # return as JSON
-        out = {
-            'sample': list(data),
-        }
-        return 200, out
+        out = {}
+        return out, 200
 
 
 def main(host='0.0.0.0', port=8000, debug=True):
