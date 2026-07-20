@@ -15,8 +15,6 @@ from as7343 import AS7343
 #from encoder import M5StackEncoder
 import npyfile
 
-from machine import Pin, SoftI2C, I2C
-
 # Free memory used by imports
 gc.collect()
 
@@ -119,26 +117,34 @@ async def _connect_wifi():
     print('WiFi connected:', wlan.ifconfig()[0])
 
 
+# TODO: track whether measuring or not
 class State:
     def __init__(self, i2c, ext):
         self.i2c = i2c
         self.ext = ext
 
-def add_routes(state):
+def add_routes(app, state):
 
     # User interface
     MAX_AGE = 1 # XXX: set longer in production, for more efficient caching
 
     @app.get('/')
-    async def index(request):
+    async def get_index(request):
         return send_file('frontend/index.html')
 
     @app.get('/static/<path:path>')
-    async def static(request, path):
+    async def get_static(request, path):
         return send_file('frontend/' + path, max_age=MAX_AGE)
 
-    @app.get('/sample')
-    async def sample(request, path):
+    @app.post('/status')
+    async def get_status(request, path):
+        s = {
+            '':
+        }
+        return 200, s
+
+    @app.post('/measure')
+    async def post_measure(request, path):
 
         # Do the measurement
         # NOTE: takes several seconds
@@ -159,18 +165,20 @@ def main(host='0.0.0.0', port=8000, debug=True):
     # Web server
     app = Microdot()
 
-    i2c_ext = I2C(1, scl=Pin(5), sda=Pin(4), freq=400000)
+    i2c_ext = None
+    ext = None
+    if False: # TODO: detect when on device
+        from machine import Pin, I2C
+        i2c_ext = I2C(1, scl=Pin(5), sda=Pin(4), freq=400000)
+        as7343 = AS7343(i2c_ext)
+        ext = AW9523(i2c_ext, address=0x5b)
 
-    as7343 = AS7343(i2c_ext)
-
-    ext = AW9523(i2c_ext, address=0x5b)
-
-    app = State(i2c=i2c_ext, ext=ext)
+    state = State(i2c=i2c_ext, ext=ext)
 
     from cors import CORS
     cors = CORS(app, allowed_origins='*', allow_credentials=False)
 
-    add_routes(app)
+    add_routes(app, state)
 
     # Reduce memory pressure
     gc.collect()
