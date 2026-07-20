@@ -9,11 +9,11 @@ import json
 import math
 
 from microdot import Microdot, Response, send_file
-
 from aw9523 import AW9523
 from as7343 import AS7343
-#from encoder import M5StackEncoder
 import npyfile
+
+import processing
 
 # Free memory used by imports
 gc.collect()
@@ -138,10 +138,13 @@ def add_routes(app, state):
 
     @app.get('/samples.json')
     async def get_samples(request):
-        s = []
-        # TODO: actually load samples
+        samples = []
 
-        return s, 200
+        path = 'data/try2/data3/'
+        for s in processing.load_samples(path):
+            samples.append(s)
+
+        return samples, 200
 
     @app.get('/status')
     async def get_status(request):
