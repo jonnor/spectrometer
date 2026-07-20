@@ -3,7 +3,7 @@
 // computed at runtime (progress width, chevron rotation), never for
 // static/reusable rules — those are CSS classes.
 import { h, render } from 'https://esm.sh/preact@10.19.6';
-import { useState, useEffect } from 'https://esm.sh/preact@10.19.6/hooks';
+import { useState, useEffect, useRef, useMemo } from 'https://esm.sh/preact@10.19.6/hooks';
 import htm from 'https://esm.sh/htm@3.1.1';
 
 const html = htm.bind(h);
@@ -117,11 +117,47 @@ function expSliderIndex(value, min, max, steps) {
 }
 
 /* ===========================================================
+   Sample data helpers
+   A sample from /samples.json is expected to look like:
+   { id, label, "uv.<name>": number, "white.<name>": number, ... }
+   Any key not in META_KEYS is treated as a measured property.
+=========================================================== */
+
+const META_KEYS = ['id', 'label', 'name', 'dataset', 'timestamp'];
+
+function sampleProperties(sample) {
+  return Object.fromEntries(Object.entries(sample).filter(([k]) => !META_KEYS.includes(k)));
+}
+
+// Drops "uv."/"white." prefixed properties per the include flags. Anything
+// without one of those prefixes is left alone.
+function filterProperties(props, { includeUv, includeWhite }) {
+  return Object.fromEntries(Object.entries(props).filter(([k]) => {
+    if (k.startsWith('uv.')) return includeUv;
+    if (k.startsWith('white.')) return includeWhite;
+    return true;
+  }));
+}
+
+const LABEL_PALETTE = ['#4f8cff', '#34c759', '#ff9f0a', '#ff375f', '#bf5af2', '#64d2ff', '#ffd60a', '#30d158'];
+const UNKNOWN_LABEL_COLOR = '#8a8f98';
+
+// Assigns a stable palette color per distinct non-"unknown" label; "unknown" is always gray.
+function buildLabelColorMap(labels) {
+  const map = {};
+  let next = 0;
+  for (const label of labels) {
+    if (label === 'unknown') { map[label] = UNKNOWN_LABEL_COLOR; continue; }
+    if (!(label in map)) { map[label] = LABEL_PALETTE[next % LABEL_PALETTE.length]; next++; }
+  }
+  return map;
+}
+
+/* ===========================================================
    Layout components
 =========================================================== */
 
 function Header({ connected, measuring, progress, onMenu, onMeasure }) {
-  console.log('header', connected, measuring, progress)
   return html`
     <header class="app-header">
       <div class="header-row">
@@ -221,6 +257,29 @@ function Footer() {
    Section contents (feature-specific, not generic components)
 =========================================================== */
 
+// Thin Preact wrapper around the global Plotly (loaded via CDN <script> in
+// index.html). Re-renders in place with Plotly.react whenever traces/layout
+// change, and cleans up with Plotly.purge on unmount.
+function PlotlyChart({ traces, layout }) {
+  const elRef = useRef(null);
+
+  useEffect(() => {
+    if (!window.Plotly || !elRef.current) return;
+    window.Plotly.react(
+      elRef.current,
+      traces,
+      { autosize: true, margin: { t: 36, r: 16, b: 48, l: 48 }, ...layout },
+      { responsive: true, displaylogo: false }
+    );
+  }, [traces, layout]);
+
+  useEffect(() => () => {
+    if (elRef.current && window.Plotly) window.Plotly.purge(elRef.current);
+  }, []);
+
+  return html`<div class="plotly-chart" ref=${elRef}></div>`;
+}
+
 // Range input driven by a linear index but displaying/emitting an
 // exponentially-spaced value. `steps` is the number of discrete positions.
 function ExpSlider({ label, value, onChange, min, max, steps }) {
@@ -242,10 +301,7 @@ function ExpSlider({ label, value, onChange, min, max, steps }) {
 
 const SAMPLES_JUPYTER_NOTEBOOK = '/static/notebook.ipynb';
 
-function SamplesSection({ dataset, label, onDatasetChange, onLabelChange }) {
-  const { data, loading, error } = useFetchJson('/samples.json');
-  const samples = Array.isArray(data) ? data : [];
-
+function SamplesSection({ dataset, label, onDatasetChange, onLabelChange, samples, loading, error }) {
   const notebookUrl = `${window.location.origin}${SAMPLES_JUPYTER_NOTEBOOK}`;
   const jupyterHref = `https://scikit-learn.org/stable/lite/lab/?fromURL=${notebookUrl}`;
 
@@ -282,7 +338,12 @@ const ALPHA_MIN = 0.01;
 const ALPHA_MAX = 10.0;
 const ALPHA_STEPS = 40;
 
-function AnalysisSection({ alpha, onAlphaChange }) {
+function AnalysisSection({
+  alpha, onAlphaChange,
+  includeUv, onIncludeUvChange,
+  includeWhite, onIncludeWhiteChange,
+  logScale, onLogScaleChange,
+}) {
   return html`
     <div class="field-grid">
       <${Field} label="Method" type="select" value=${ANALYSIS_METHOD} disabled>
@@ -296,21 +357,132 @@ function AnalysisSection({ alpha, onAlphaChange }) {
         max=${ALPHA_MAX}
         steps=${ALPHA_STEPS}
       />
+      <${Field}
+        label="Include UV emissions"
+        type="checkbox"
+        checked=${includeUv}
+        onInput=${e => onIncludeUvChange(e.target.checked)}
+      />
+      <${Field}
+        label="Include white emissions"
+        type="checkbox"
+        checked=${includeWhite}
+        onInput=${e => onIncludeWhiteChange(e.target.checked)}
+      />
+      <${Field}
+        label="Log-scale values"
+        type="checkbox"
+        checked=${logScale}
+        onInput=${e => onLogScaleChange(e.target.checked)}
+      />
     </div>
   `;
 }
 
-function VisualizationSection() {
+// filteredSamples: [{ id, label, properties: {col: value, ...} }, ...]
+function VisualizationSection({ filteredSamples, logScale }) {
+  const columns = useMemo(
+    () => [...new Set(filteredSamples.flatMap(s => Object.keys(s.properties)))].sort(),
+    [filteredSamples]
+  );
+
+  const labels = useMemo(
+    () => [...new Set(filteredSamples.map(s => s.label))],
+    [filteredSamples]
+  );
+  const colorMap = useMemo(() => buildLabelColorMap(labels), [labels]);
+
+  // Manual column pickers for the XY plot; default to the first two
+  // available columns once they're known.
+  const [xyCols, setXyCols] = useState({ x: '', y: '' });
+  useEffect(() => {
+    if (!xyCols.x && !xyCols.y && columns.length >= 2) {
+      setXyCols({ x: columns[0], y: columns[1] });
+    }
+  }, [columns]);
+
+  const rawTraces = useMemo(() => {
+    const byLabel = new Map();
+    for (const sample of filteredSamples) {
+      const bucket = byLabel.get(sample.label) ?? { x: [], y: [] };
+      for (const col of columns) {
+        if (col in sample.properties) {
+          bucket.x.push(col);
+          bucket.y.push(sample.properties[col]);
+        }
+      }
+      byLabel.set(sample.label, bucket);
+    }
+    return [...byLabel.entries()].map(([label, pts]) => ({
+      x: pts.x, y: pts.y, name: label,
+      mode: 'markers', type: 'scatter',
+      marker: { color: colorMap[label], size: 7 },
+    }));
+  }, [filteredSamples, columns, colorMap]);
+
+  const xyTraces = useMemo(() => {
+    if (!xyCols.x || !xyCols.y) return [];
+    const byLabel = new Map();
+    for (const sample of filteredSamples) {
+      const xv = sample.properties[xyCols.x];
+      const yv = sample.properties[xyCols.y];
+      if (xv === undefined || yv === undefined) continue;
+      const bucket = byLabel.get(sample.label) ?? { x: [], y: [] };
+      bucket.x.push(xv);
+      bucket.y.push(yv);
+      byLabel.set(sample.label, bucket);
+    }
+    return [...byLabel.entries()].map(([label, pts]) => ({
+      x: pts.x, y: pts.y, name: label,
+      mode: 'markers', type: 'scatter',
+      marker: { color: colorMap[label], size: 7 },
+    }));
+  }, [filteredSamples, xyCols, colorMap]);
+
+  const axisType = logScale ? 'log' : 'linear';
+
   return html`
-    <div class="viz-placeholder">
-      <p>Chart / plot output will render here.</p>
-      <div class="field-grid">
-        <${Field} label="Plot type" type="select">
-          <option>Line</option>
-          <option>Bar</option>
-          <option>Scatter</option>
-        <//>
-      </div>
+    <div class="viz-plot">
+      <${PlotlyChart}
+        traces=${rawTraces}
+        layout=${{
+          title: 'Raw data',
+          xaxis: { type: 'category', title: 'Property', categoryorder: 'category ascending' },
+          yaxis: { title: 'Value', type: axisType },
+          legend: { orientation: 'h' },
+        }}
+      />
+    </div>
+
+    <div class="viz-xy-controls field-grid">
+      <${Field}
+        label="X column"
+        type="select"
+        value=${xyCols.x}
+        onInput=${e => setXyCols(c => ({ ...c, x: e.target.value }))}
+      >
+        ${columns.map(c => html`<option key=${c} value=${c}>${c}</option>`)}
+      <//>
+      <${Field}
+        label="Y column"
+        type="select"
+        value=${xyCols.y}
+        onInput=${e => setXyCols(c => ({ ...c, y: e.target.value }))}
+      >
+        ${columns.map(c => html`<option key=${c} value=${c}>${c}</option>`)}
+      <//>
+    </div>
+
+    <div class="viz-plot">
+      <${PlotlyChart}
+        traces=${xyTraces}
+        layout=${{
+          title: 'XY scatter',
+          xaxis: { title: xyCols.x, type: axisType },
+          yaxis: { title: xyCols.y, type: axisType },
+          legend: { orientation: 'h' },
+        }}
+      />
     </div>
   `;
 }
@@ -337,13 +509,12 @@ function useStatus(url = '/status', intervalMs = POLL_MS) {
       try {
         const res = await fetch(url);
         if (!res.ok) throw new Error('bad status');
-        const data = await res.json();
-        console.log('status-poll-returned', data)
+        const text = await res.text();
+        const data = text ? JSON.parse(text) : {};
         if (!cancelled) {
           setStatus({ connected: true, measuring: !!data.measuring, progress: data.progress ?? 0 });
         }
-      } catch (e) {
-        console.log('status-poll-exception', e)
+      } catch {
         if (!cancelled) setStatus({ connected: false, measuring: false, progress: 0 });
       }
     }
@@ -374,7 +545,7 @@ async function startMeasurement(params) {
 
 function App() {
   const { connected, measuring, progress } = useStatus();
-  const [openId, setOpenId] = useState('visualization');
+  const [openId, setOpenId] = useState('samples');
   const [menuOpen, setMenuOpen] = useState(false);
 
   // Everything the measure endpoint needs, as one object.
@@ -382,7 +553,21 @@ function App() {
     dataset: 'data2',
     label: 'unknown',
     alpha: 1.0,
+    includeUv: true,
+    includeWhite: true,
+    logScale: true,
   });
+
+  // Fetched once here and shared by Samples (list/download) and
+  // Visualization (plots), instead of each section fetching separately.
+  const { data: samplesData, loading: samplesLoading, error: samplesError } = useFetchJson('/samples.json');
+  const samples = Array.isArray(samplesData) ? samplesData : [];
+
+  const filteredSamples = useMemo(() => samples.map(s => ({
+    id: s.id,
+    label: s.label ?? 'unknown',
+    properties: filterProperties(sampleProperties(s), measureParams),
+  })), [samples, measureParams.includeUv, measureParams.includeWhite]);
 
   const sections = [
     {
@@ -395,6 +580,9 @@ function App() {
           label=${measureParams.label}
           onDatasetChange=${dataset => setMeasureParams(p => ({ ...p, dataset }))}
           onLabelChange=${label => setMeasureParams(p => ({ ...p, label }))}
+          samples=${samples}
+          loading=${samplesLoading}
+          error=${samplesError}
         />
       `,
     },
@@ -406,6 +594,12 @@ function App() {
         <${AnalysisSection}
           alpha=${measureParams.alpha}
           onAlphaChange=${alpha => setMeasureParams(p => ({ ...p, alpha }))}
+          includeUv=${measureParams.includeUv}
+          onIncludeUvChange=${includeUv => setMeasureParams(p => ({ ...p, includeUv }))}
+          includeWhite=${measureParams.includeWhite}
+          onIncludeWhiteChange=${includeWhite => setMeasureParams(p => ({ ...p, includeWhite }))}
+          logScale=${measureParams.logScale}
+          onLogScaleChange=${logScale => setMeasureParams(p => ({ ...p, logScale }))}
         />
       `,
     },
@@ -413,7 +607,12 @@ function App() {
       id: 'visualization',
       title: 'Visualization',
       summary: measuring ? html`<${Chip} tone="accent">Live<//>` : null,
-      content: html`<${VisualizationSection} />`,
+      content: html`
+        <${VisualizationSection}
+          filteredSamples=${filteredSamples}
+          logScale=${measureParams.logScale}
+        />
+      `,
     },
   ];
 
