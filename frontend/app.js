@@ -125,16 +125,34 @@ function expSliderIndex(value, min, max, steps) {
 
 const META_KEYS = ['id', 'label', 'name', 'dataset', 'timestamp'];
 
+// Only these channels are ever shown for uv./white. properties.
+const CHANNELS = ['F1', 'F2', 'FZ', 'F3', 'F4', 'F5', 'FY', 'FXL', 'F6', 'F7', 'F8'];
+
+function defaultChannelState() {
+  return Object.fromEntries(CHANNELS.map(c => [c, true]));
+}
+
 function sampleProperties(sample) {
   return Object.fromEntries(Object.entries(sample).filter(([k]) => !META_KEYS.includes(k)));
 }
 
-// Drops "uv."/"white." prefixed properties per the include flags. Anything
-// without one of those prefixes is left alone.
-function filterProperties(props, { includeUv, includeWhite }) {
+// Drops "none."-prefixed properties unconditionally, applies the uv/white
+// include flags, and restricts uv./white. properties to enabled channels
+// from CHANNELS. Non-uv/white, non-"none." properties pass through untouched.
+function filterProperties(props, { includeUv, includeWhite, channels }) {
   return Object.fromEntries(Object.entries(props).filter(([k]) => {
-    if (k.startsWith('uv.')) return includeUv;
-    if (k.startsWith('white.')) return includeWhite;
+    if (k.startsWith('none.')) return false;
+    if (!k.includes('.')) return false; // unprefixed = index column, not a plottable property
+    if (k.startsWith('uv.')) {
+      if (!includeUv) return false;
+      const channel = k.slice(3);
+      return !!channels[channel];
+    }
+    if (k.startsWith('white.')) {
+      if (!includeWhite) return false;
+      const channel = k.slice(6);
+      return !!channels[channel];
+    }
     return true;
   }));
 }
@@ -343,6 +361,7 @@ function AnalysisSection({
   includeUv, onIncludeUvChange,
   includeWhite, onIncludeWhiteChange,
   logScale, onLogScaleChange,
+  channels, onChannelToggle,
 }) {
   return html`
     <div class="field-grid">
@@ -375,6 +394,20 @@ function AnalysisSection({
         checked=${logScale}
         onInput=${e => onLogScaleChange(e.target.checked)}
       />
+    </div>
+
+    <div class="channel-grid-label">Channels</div>
+    <div class="channel-grid">
+      ${CHANNELS.map(c => html`
+        <label class="channel-toggle" key=${c}>
+          <input
+            type="checkbox"
+            checked=${channels[c]}
+            onInput=${e => onChannelToggle(c, e.target.checked)}
+          />
+          <span>${c}</span>
+        </label>
+      `)}
     </div>
   `;
 }
@@ -556,6 +589,7 @@ function App() {
     includeUv: true,
     includeWhite: true,
     logScale: true,
+    channels: defaultChannelState(),
   });
 
   // Fetched once here and shared by Samples (list/download) and
@@ -567,7 +601,7 @@ function App() {
     id: s.id,
     label: s.label ?? 'unknown',
     properties: filterProperties(sampleProperties(s), measureParams),
-  })), [samples, measureParams.includeUv, measureParams.includeWhite]);
+  })), [samples, measureParams.includeUv, measureParams.includeWhite, measureParams.channels]);
 
   const sections = [
     {
@@ -600,6 +634,11 @@ function App() {
           onIncludeWhiteChange=${includeWhite => setMeasureParams(p => ({ ...p, includeWhite }))}
           logScale=${measureParams.logScale}
           onLogScaleChange=${logScale => setMeasureParams(p => ({ ...p, logScale }))}
+          channels=${measureParams.channels}
+          onChannelToggle=${(channel, checked) => setMeasureParams(p => ({
+            ...p,
+            channels: { ...p.channels, [channel]: checked },
+          }))}
         />
       `,
     },
